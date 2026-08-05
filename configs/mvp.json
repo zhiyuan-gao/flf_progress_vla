@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "method": "stage-state plus continuous video progress GR00T continuation",
+  "resources": {
+    "gr00t_root": "${GR00T_ROOT}",
+    "data_root": "${ROBOCASA365_DATA_ROOT}",
+    "split_config": "configs/robocasa365_four_task_split_100.json",
+    "base_checkpoint": "${GR00T_BASE_CHECKPOINT}"
+  },
+  "index_dir": "artifacts/indices",
+  "output_dir": "outputs/mvp_continuation",
+  "tasks": [
+    "PreSoakPan",
+    "KettleBoiling",
+    "LoadDishwasher",
+    "RinseSinkBasin"
+  ],
+  "stage_counts": {
+    "PreSoakPan": 5,
+    "KettleBoiling": 3,
+    "LoadDishwasher": 5,
+    "RinseSinkBasin": 2
+  },
+  "condition": {
+    "max_stages": 5,
+    "reference_stride": 8,
+    "control_hz": 20,
+    "progress_source": "grid",
+    "progress_noise_nodes": 0,
+    "completion_threshold": 0.9,
+    "completion_confirmations": 2
+  },
+  "model": {
+    "data_config": "panda_omron",
+    "embodiment_tag": "new_embodiment",
+    "action_horizon": 16,
+    "tune_visual": false,
+    "tune_llm": false,
+    "tune_projector": true,
+    "tune_diffusion_model": true,
+    "compute_dtype": "bfloat16"
+  },
+  "training": {
+    "seed": 42,
+    "max_steps": 1000,
+    "global_batch_size": 128,
+    "per_device_batch_size": 8,
+    "learning_rate": 0.00003,
+    "weight_decay": 0.00001,
+    "warmup_ratio": 0.05,
+    "logging_steps": 10,
+    "eval_steps": 250,
+    "save_steps": 250,
+    "save_total_limit": 4,
+    "dataloader_num_workers": 8,
+    "video_backend": "opencv"
+  }
+}

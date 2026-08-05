@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stage-state-video-progress"
+version = "0.1.0"
+description = "Stage-state and continuous video-progress continuation fine-tuning for GR00T on RoboCasa365."
+readme = "README.md"
+requires-python = ">=3.10,<3.11"
+dependencies = [
+  "numpy==2.2.5",
+  "pandas==2.2.3",
+  "pyarrow==25.0.0",
+]
+
+[project.optional-dependencies]
+train = [
+  "torch==2.5.1",
+  "torchvision==0.20.1",
+  "transformers==4.51.3",
+  "accelerate==1.14.0",
+  "tensorboard==2.20.0",
+]
+dev = [
+  "pytest==9.1.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

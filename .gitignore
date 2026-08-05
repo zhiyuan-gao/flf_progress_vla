@@ -1,0 +1,14 @@
+__pycache__/
+.pytest_cache/
+*.pyc
+*.egg-info/
+.coverage
+build/
+dist/
+.env
+.venv/
+external/
+configs/local*.json
+artifacts/indices/*.jsonl
+artifacts/indices/summary.json
+outputs/
