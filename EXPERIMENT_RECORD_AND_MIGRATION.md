@@ -27,7 +27,7 @@ commit: 9d7d7a9eb7ad30bd8ce30448d9ab53a918b45b10
 package: gr00t 1.1.0
 ```
 
-本机代码仓库的远端基线 commit 是 `4f5c443`。实验和评估还依赖未提交的本地修改，见第 7 节；仅在新机器重新 clone 远端仓库不能完整复现本机结果。
+本机实验分支为 `experiment/gt-video-progress-10k`，已发布的实验基线 commit 是 `8bd4f2f`。条件敏感性评估代码与结果在此基础上增加；迁移时应同时携带本文列出的代码和小型实验记录。
 
 ## 2. 数据与固定划分
 
@@ -179,6 +179,33 @@ outputs/reference_video_rollout/gt_test50_v1/dtw_gt_replay_summary.json
 
 该结果只说明“在 held-out GT trajectory replay 上，DTW 能否恢复标注进度”。它不是自由 rollout 偏离 demonstration 后的语义进度准确率，也不是策略成功率。
 
+### 5.1 checkpoint-10000 条件敏感性检查
+
+在四任务 validation set 中确定性、均衡抽取 256 帧（每任务 64 帧、每个任务覆盖全部 10 个 validation episode、4 个 progress 区间各 16 帧）。固定 RGB、robot state、language、target action、flow-matching noise 和 diffusion timestep，只改变 condition slots：
+
+1. `correct`：正确 stage + 正确 progress；
+2. `wrong_progress`：正确 stage + 同任务、同 stage、不同 episode 的 progress；所有进度扰动绝对值至少为 0.25；
+3. `wrong_stage`：同任务内换成另一个有效 stage，保留正确 progress。
+
+| 任务 | Correct loss | Wrong progress loss | 相对变化 | Wrong stage loss | 相对变化 |
+|---|---:|---:|---:|---:|---:|
+| PreSoakPan | 0.039219 | 0.041335 | +5.39% | 0.038650 | -1.45% |
+| KettleBoiling | 0.036048 | 0.043851 | +21.65% | 0.035852 | -0.54% |
+| LoadDishwasher | 0.048538 | 0.051973 | +7.08% | 0.047612 | -1.91% |
+| RinseSinkBasin | 0.082768 | 0.085012 | +2.71% | 0.082864 | +0.12% |
+| **总体** | **0.051643** | **0.055543** | **+7.55%** | **0.051245** | **-0.77%** |
+
+按预先约定的 1% 相对 loss 差异 MVP 门槛，四个任务的错误 progress 都使 loss 上升，说明 `checkpoint-10000` 对 progress 有稳定、可检测的依赖。错误 stage 在总体和每个任务上都没有超过 1% 的正向劣化信号，因此本协议下没有检测到 stage 的增量作用；更严谨的表述是“未检测到 stage sensitivity”，而不是断言模型在所有情形下完全忽略 stage。
+
+实验使用 4 张 A100、每卡一个任务、batch 32，墙钟时间 26.03 秒，单卡峰值 allocated memory 约 16.5 GiB。完整报告包含 256 个样本、progress donor、stage/bin/episode 覆盖和每批固定 flow seed：
+
+```text
+outputs/condition_sensitivity_mvp256/report.json
+SHA-256: a2b637ba6742c643fa53e9755ee523d83c51c34dfa7810f9a61adf3aaff43154
+```
+
+适合随 Git 迁移的紧凑结果为 `experiment_records/condition_sensitivity_mvp256_summary.json`。该离线实验说明模型是否使用条件，但不能单独证明条件提高了闭环成功率；闭环结论仍以第 4 节同 episode simulator 对比为准。
+
 ## 6. 哪些 checkpoint 和记录值得保留
 
 ### 自研产物：必须迁移或备份
@@ -187,7 +214,7 @@ outputs/reference_video_rollout/gt_test50_v1/dtw_gt_replay_summary.json
 2. `configs/robocasa365_four_task_split_100.json`：逐任务记录 train100、val10 和原 test20 的 episode 编号；
 3. `configs/gt_test50_v1.json`：逐任务记录冻结 test50 的 episode 编号、选择算法及数据元信息哈希；
 4. 本地工作树代码、`configs/` 和 `artifacts/indices/`；
-5. 三个最终汇总 JSON、本文件和 `SELF_METHOD_TRANSFER_MANIFEST.txt`。
+5. simulator、DTW 和条件敏感性最终汇总 JSON、本文件和 `SELF_METHOD_TRANSFER_MANIFEST.txt`。
 
 ### 官方资源：只记录版本，不迁移
 
@@ -199,6 +226,7 @@ outputs/reference_video_rollout/gt_test50_v1/dtw_gt_replay_summary.json
 
 - `outputs/reference_video_rollout/gt_test50_v1/`：约 280 MiB，包含两组每 episode summary、manifest 和 rollout 视频；建议迁移，便于审计和配对分析。
 - `outputs/formal_train.log`、`outputs/gt_test50_v1_eval.log`、`outputs/official_groot_baseline_eval.log` 和 `outputs/dtw_gt_replay_eval.log`：体积很小，建议迁移。
+- `outputs/condition_sensitivity_mvp256/`：完整离线条件敏感性报告、逐任务报告和运行日志；紧凑摘要已保存在 `experiment_records/`。
 - `outputs/mvp_continuation/runs/`：TensorBoard 记录，建议迁移。
 
 ### 不需要为通常迁移携带
@@ -270,7 +298,7 @@ transfer/self_method_checkpoint10000/checkpoint-10000-inference.tar.zst
 1. 当前 repo 工作树，排除 `.venv/`、`external/` 和大体积 `outputs/`；代码、配置与 indices 约 105 MiB；
 2. `configs/robocasa365_four_task_split_100.json` 和 `configs/gt_test50_v1.json`；
 3. `outputs/reference_video_rollout/gt_test50_v1/`，约 280 MiB，包含两组逐 episode summary、manifest 和 rollout 视频；
-4. 最终训练日志、TensorBoard 记录和三份最终汇总 JSON。
+4. 最终训练日志、TensorBoard 记录、simulator/DTW 汇总和条件敏感性汇总。
 
 官方 baseline 的 summary 属于我们生成的实验记录，可以保留；官方模型权重本身不复制。
 
@@ -363,12 +391,16 @@ added:
   scripts/launch_gt_test50_eval.sh
   scripts/launch_official_groot_baseline_eval.sh
   scripts/run_gt_test50_batch.py
+  scripts/launch_condition_sensitivity_mvp.sh
+  experiment_records/condition_sensitivity_mvp256_summary.json
   EXPERIMENT_RECORD_AND_MIGRATION.md
   MIGRATION_SHA256SUMS.txt
   SELF_METHOD_TRANSFER_MANIFEST.txt
   transfer/self_method_checkpoint10000/README.md
   transfer/self_method_checkpoint10000/ARCHIVE_SHA256.txt
 ```
+
+`scripts/evaluate_conditions.py` 也已更新为正式的四任务均衡、三条件、固定 flow noise/timestep 评估入口。
 
 其中 `rollout_reference_video.py` 包含准确恢复 episode XML/MuJoCo 初始状态和稳定写视频所需的修正。5.6 GiB 的 `checkpoint-10000-inference.tar.zst` 被 `.gitignore` 排除，只通过用户选择的外部方式传输；Git 中只保存它的说明和校验值。
 

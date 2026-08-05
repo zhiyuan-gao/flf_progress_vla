@@ -20,6 +20,7 @@ configs/gt_test50_v1.json
 artifacts/indices/summary.json
 artifacts/indices/train.jsonl
 artifacts/indices/val.jsonl
+experiment_records/condition_sensitivity_mvp256_summary.json
 src/
 scripts/
 EXPERIMENT_RECORD_AND_MIGRATION.md
@@ -34,6 +35,7 @@ outputs/reference_video_rollout/gt_test50_v1/
 outputs/gt_test50_v1_eval.log
 outputs/official_groot_baseline_eval.log
 outputs/dtw_gt_replay_eval.log
+outputs/condition_sensitivity_mvp256/
 
 [optional_exact_resume]
 outputs/mvp_continuation/checkpoint-10000/optimizer.pt
