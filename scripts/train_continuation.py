@@ -143,6 +143,7 @@ def main() -> int:
         "per_device_batch_size": local_batch,
         "gradient_accumulation_steps": grad_accum,
         "effective_global_batch_size": denominator * grad_accum,
+        "periodic_eval": not args.no_eval,
         "task_sampling": "uniform task then uniform frame",
         "condition_slots": "first two unused dimensions in native state[64]",
         "normalization_metadata": str(

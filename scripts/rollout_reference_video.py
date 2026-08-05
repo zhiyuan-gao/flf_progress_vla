@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import sys
 import time
@@ -110,20 +111,38 @@ def select_episode(args: argparse.Namespace, split_config: Path) -> int:
 
 def restore_episode_start(gym_env: Any, dataset: Path, episode: int) -> dict[str, Any]:
     """Restore the demonstration XML and MuJoCo state before free rollout."""
-    from robocasa.scripts.dataset_scripts.playback_dataset import reset_to
-    from robocasa.utils import lerobot_utils
+    import robosuite
 
     gym_env.reset()
     wrapper = gym_env.unwrapped
-    states = lerobot_utils.get_episode_states(dataset, episode)
-    reset_to(
-        wrapper.env,
-        {
-            "states": states[0],
-            "model": lerobot_utils.get_episode_model_xml(dataset, episode),
-            "ep_meta": json.dumps(lerobot_utils.get_episode_meta(dataset, episode)),
-        },
-    )
+    episode_dir = dataset / "extras" / f"episode_{episode:06d}"
+    with np.load(episode_dir / "states.npz") as states_file:
+        initial_state = states_file["states"][0]
+    with gzip.open(episode_dir / "model.xml.gz", "rt", encoding="utf-8") as xml_file:
+        model_xml = xml_file.read()
+    ep_meta = json.loads((episode_dir / "ep_meta.json").read_text(encoding="utf-8"))
+
+    env = wrapper.env
+    if hasattr(env, "set_attrs_from_ep_meta"):
+        env.set_attrs_from_ep_meta(ep_meta)
+    elif hasattr(env, "set_ep_meta"):
+        env.set_ep_meta(ep_meta)
+    env.reset()
+    robosuite_minor = int(robosuite.__version__.split(".")[1])
+    if robosuite_minor <= 3:
+        from robosuite.utils.mjcf_utils import postprocess_model_xml
+
+        model_xml = postprocess_model_xml(model_xml)
+    else:
+        model_xml = env.edit_model_xml(model_xml)
+    env.reset_from_xml_string(model_xml)
+    env.sim.reset()
+    env.sim.set_state_from_flattened(initial_state)
+    env.sim.forward()
+    if hasattr(env, "update_sites"):
+        env.update_sites()
+    if hasattr(env, "update_state"):
+        env.update_state()
     raw = wrapper.env._get_observations(force_update=True)
     return wrapper.get_observation(raw)
 
@@ -299,7 +318,12 @@ def main() -> int:
     observation = restore_episode_start(gym_env, dataset, episode)
     writer = None
     if not args.no_video:
-        writer = imageio.get_writer(output_dir / "rollout.mp4", fps=20, codec="libx264")
+        writer = imageio.get_writer(
+            output_dir / "rollout.mp4",
+            format="FFMPEG",
+            fps=20,
+            codec="libx264",
+        )
     conditions: list[dict[str, Any]] = []
     started = time.time()
     step = 0

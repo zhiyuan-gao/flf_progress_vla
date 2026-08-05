@@ -56,16 +56,16 @@
   },
   "training": {
     "seed": 42,
-    "max_steps": 1000,
+    "max_steps": 10000,
     "global_batch_size": 128,
-    "per_device_batch_size": 8,
+    "per_device_batch_size": 32,
     "learning_rate": 0.00003,
     "weight_decay": 0.00001,
     "warmup_ratio": 0.05,
     "logging_steps": 10,
     "eval_steps": 250,
-    "save_steps": 250,
-    "save_total_limit": 4,
+    "save_steps": 500,
+    "save_total_limit": 7,
     "dataloader_num_workers": 8,
     "video_backend": "opencv"
   }

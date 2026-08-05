@@ -1,0 +1,52 @@
+# Self-method artifacts produced on this machine.
+# Official GR00T weights and RoboCasa365 datasets are intentionally excluded.
+
+[ready_to_copy_archive]
+transfer/self_method_checkpoint10000/checkpoint-10000-inference.tar.zst
+transfer/self_method_checkpoint10000/ARCHIVE_SHA256.txt
+transfer/self_method_checkpoint10000/README.md
+
+[required_inference]
+outputs/mvp_continuation/checkpoint-10000/config.json
+outputs/mvp_continuation/checkpoint-10000/model-00001-of-00002.safetensors
+outputs/mvp_continuation/checkpoint-10000/model-00002-of-00002.safetensors
+outputs/mvp_continuation/checkpoint-10000/model.safetensors.index.json
+outputs/mvp_continuation/checkpoint-10000/experiment_cfg/metadata.json
+
+[required_code_and_data_ids]
+configs/mvp.json
+configs/robocasa365_four_task_split_100.json
+configs/gt_test50_v1.json
+artifacts/indices/summary.json
+artifacts/indices/train.jsonl
+artifacts/indices/val.jsonl
+src/
+scripts/
+EXPERIMENT_RECORD_AND_MIGRATION.md
+MIGRATION_SHA256SUMS.txt
+
+[recommended_experiment_records]
+outputs/formal_train.log
+outputs/mvp_continuation/stage_state_run_config.json
+outputs/mvp_continuation/trainer_state.json
+outputs/mvp_continuation/runs/
+outputs/reference_video_rollout/gt_test50_v1/
+outputs/gt_test50_v1_eval.log
+outputs/official_groot_baseline_eval.log
+outputs/dtw_gt_replay_eval.log
+
+[optional_exact_resume]
+outputs/mvp_continuation/checkpoint-10000/optimizer.pt
+outputs/mvp_continuation/checkpoint-10000/scheduler.pt
+outputs/mvp_continuation/checkpoint-10000/trainer_state.json
+outputs/mvp_continuation/checkpoint-10000/rng_state_0.pth
+outputs/mvp_continuation/checkpoint-10000/rng_state_1.pth
+outputs/mvp_continuation/checkpoint-10000/rng_state_2.pth
+outputs/mvp_continuation/checkpoint-10000/rng_state_3.pth
+
+[redownload_do_not_transfer]
+RoboCasa365 task datasets at the snapshots recorded in RESOURCE_SETUP.md
+Official composite_seen checkpoint-60000 at the fixed Hugging Face revision
+external/Isaac-GR00T at commit 9d7d7a9eb7ad30bd8ce30448d9ab53a918b45b10
+external/robosuite at commit 5ce6643f3092639d08f7b0f90ed1c6a84f50552c
+.venv/
