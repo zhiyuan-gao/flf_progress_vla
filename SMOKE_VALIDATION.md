@@ -25,6 +25,17 @@ No formal continuation experiment was started. The following checks were run onl
   - 1,068,806,144 trainable action-side parameters out of 2,724,163,520 total;
   - initial two-step mean training loss 0.32067.
 - Checkpoint write, final model write, and local checkpoint resume paths completed after the compatibility fixes below.
+- Ground-truth reference-video inference plumbing:
+  - decoded `agentview_left` for a real five-stage validation demonstration;
+  - produced 100 stride-8 reference nodes with the validated 3,072-D RGB32 descriptors;
+  - ported the zero-penalty monotonic subsequence-DTW protocol used by the earlier held-out
+    GT-video experiment;
+  - validated all five uniform/nonuniform path styles, rolling stride-8 query collection,
+    cross-call non-rewinding endpoints, stage confirmation, action conversion, and
+    conditioned-policy dispatch;
+  - expert-action simulator replay localized stage-0 endpoints exactly at nodes
+    `0, 2, 4, 6, 8` for control steps `0, 16, 32, 48, 64`;
+  - `19 passed` after adding DTW inference coverage.
 
 ## Issues caught by the smoke
 

@@ -90,12 +90,16 @@ temporal aliasing；显式加入 coarse stage 与 continuous within-stage progre
 - counterfactual condition 离线评估；
 - conditioned GR00T policy wrapper；
 - 只允许 hold 或 `+1` 的 monotonic stage controller。
+- 从真实 demonstration 三视角视频构造 per-stage reference nodes；
+- 已在前序实验验证的 monotonic subsequence-DTW progress localizer；
+- action chunk 执行期间按 stride-8 收集 observation，维护最近 8 个 query nodes；
+- 从真实 demonstration XML/state 起点运行的单 episode RoboCasa rollout driver。
 
 尚未实现：
 
 - 上层子任务视频生成模型；
-- 从当前图像和参考视频估计 `p_t` 的 progress localizer；
-- 完整 RoboCasa online rollout/evaluation driver；
+- 可处理 rollout 大幅偏离 reference 的 learned visual representation/localizer；
+- 正式的多 episode、多 seed RoboCasa batch evaluation driver；
 - 正式 1000-step continuation checkpoint。
 
 HPC 上的 Codex 不应假定这些缺失模块已经存在。当前仓库首先负责跑通 oracle-conditioned
@@ -120,6 +124,7 @@ continuation；video generator 和 progress localizer 是后续通过相同 `(k_
 | Data split | 100 train / 10 validation / 20 locked test episodes per task |
 | Test policy | 正式模型选择期间不得读取或调参 test split |
 | Stage transition | progress `>=0.9` 连续两次后只允许 `k→k+1`，禁止回退和跳级 |
+| Progress localizer | `agentview_left` RGB32、stride-8、8-node monotonic subsequence-DTW |
 
 HPC GPU 数量变化时可以调整 per-device batch 与 gradient accumulation，但第一轮仍应保持
 effective global batch 128，从而不改变优化语义。
@@ -305,6 +310,52 @@ actions = policy.get_action_with_condition(
 
 `MonotonicStageController` 只允许 hold 或 `+1`，默认 progress `>=0.9` 连续确认两次才推进。
 Oracle progress 和后续 video localizer 都通过同一接口提供 `current_progress`，无需修改 VLA。
+
+## 9. Ground-truth reference video rollout
+
+先验证真实 demonstration 能被切成每个 stage 的 `agentview_left` reference nodes，不加载模型
+或仿真器：
+
+```bash
+python scripts/rollout_reference_video.py \
+  --task PreSoakPan \
+  --episode-split val \
+  --prepare-only
+```
+
+使用训练后的 conditioned checkpoint，从同一 demonstration 的 XML 和初始 MuJoCo state 开始
+闭环执行：
+
+```bash
+python scripts/rollout_reference_video.py \
+  --checkpoint outputs/mvp_continuation \
+  --task PreSoakPan \
+  --episode-split val \
+  --condition-source reference_dtw
+```
+
+`reference_dtw` 使用前序 held-out GT-video 实验验证过的协议：单个 `agentview_left` RGB32
+descriptor，reference 和 rollout observation 都每 8 个 control frames 取一个节点，保留最近 8 个
+query nodes，与当前 stage 的完整 reference 做 monotonic subsequence-DTW。对齐没有固定窗口或
+全局速度，允许 stay 和任意 forward jump；`motion_weight`、`stay_penalty` 和 `jump_penalty` 均为
+0。跨 policy call 额外约束 endpoint 不回退，stage 仍由连续两次 `progress>=0.9` 推进。
+
+前序 validation/test 各 75 条 held-out stage video 的五种非均匀 GT path 实验中，该协议的
+full-path exact accuracy 为 100%，path MAE 和 endpoint progress MAE 均为 0。该结果证明的是
+同一 GT stage video 内的任意单调时间路径可恢复，不代表 policy rollout 偏离 reference 后仍有
+同样准确率。
+
+诊断时可以使用 `--condition-source reference_clock`，按已执行 control step 读取 demonstration
+的 stage/progress。它只能验证 condition/policy/rollout plumbing；rollout 偏离 demonstration 后，
+它不是 simulator semantic oracle。默认只允许 train/validation episode；访问 locked test 必须显式
+传入 `--allow-locked-test`。
+
+## 10. 已记录的推理待决项
+
+query length 8 的含义、训练与推理设置的边界，以及训练完成后建议比较的 progress 修正和
+stage 切换规则，统一记录在 [INFERENCE_DESIGN_NOTES.md](INFERENCE_DESIGN_NOTES.md)。这些设置
+目前不改变训练合同；正式训练期间保持 oracle stage/progress targets 不变，待 checkpoint 完成后
+固定同一个模型做推理 ablation。
 
 ## 已完成的实现验证
 

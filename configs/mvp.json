@@ -28,7 +28,21 @@
     "progress_source": "grid",
     "progress_noise_nodes": 0,
     "completion_threshold": 0.9,
-    "completion_confirmations": 2
+    "completion_confirmations": 2,
+    "localizer": {
+      "type": "monotonic_subsequence_dtw",
+      "camera_keys": [
+        "video.robot0_agentview_left"
+      ],
+      "feature_source": "rgb32",
+      "image_size": 32,
+      "query_length": 8,
+      "query_stride": 8,
+      "motion_weight": 0.0,
+      "stay_penalty": 0.0,
+      "jump_penalty": 0.0,
+      "hard_max_reference_span": null
+    }
   },
   "model": {
     "data_config": "panda_omron",
