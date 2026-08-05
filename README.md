@@ -133,7 +133,8 @@ effective global batch 128，从而不改变优化语义。
 
 如果这是 HPC Codex 第一次看到项目，应按以下顺序工作：
 
-1. 阅读本 README、`configs/mvp.json`、`THIRD_PARTY.md` 和 `SMOKE_VALIDATION.md`。
+1. 阅读本 README、`RESOURCE_SETUP.md`、`configs/mvp.json`、`THIRD_PARTY.md` 和
+   `SMOKE_VALIDATION.md`。
 2. 复制 `.env.example` 为 `.env`，只填写 HPC 上的外部资源绝对路径。
 3. 运行 `python scripts/check_environment.py`，确认 GR00T commit、Transformers 和 GPU。
 4. 运行 `python -m pytest -q`，再生成索引并运行 `scripts/smoke_dataset.py`。
@@ -179,6 +180,7 @@ train 和 validation，不读取 test。
 ├── tests/
 ├── .env.example
 ├── pyproject.toml
+├── RESOURCE_SETUP.md
 └── THIRD_PARTY.md
 ```
 
@@ -212,6 +214,24 @@ python -m pip install -e '.[dev]'
 重新安装平台相关的 CUDA PyTorch wheel。
 
 ## 3. 配置外部资源
+
+如果新机器上没有任何数据或模型，先严格按照
+[RESOURCE_SETUP.md](RESOURCE_SETUP.md) 下载并校验资源。不要用 `target_only`、Human300、
+pretrain/MimicGen 数据或其他 checkpoint 替换。
+
+固定资源摘要：
+
+| 资源 | 必须使用的版本 |
+|---|---|
+| 数据 | RoboCasa365 target-human / composite |
+| PreSoakPan | snapshot `20250809` |
+| KettleBoiling | snapshot `20250814` |
+| LoadDishwasher | snapshot `20250811` |
+| RinseSinkBasin | snapshot `20250816` |
+| 父模型仓库 | `robocasa/robocasa365_checkpoints` |
+| 父模型 revision | `14895998fe7c8f8f2441cc8957ec2c510302758b` |
+| 父模型目录 | `gr00t_n1-5/foundation_model_learning/target_posttraining/composite_seen/checkpoint-60000` |
+| GR00T 代码 | RoboCasa Isaac-GR00T commit `9d7d7a9eb7ad30bd8ce30448d9ab53a918b45b10` |
 
 ```bash
 cp .env.example .env
