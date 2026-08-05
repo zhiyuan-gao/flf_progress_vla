@@ -6,6 +6,136 @@ stage-state + continuous video progress continuation fine-tuning。
 仓库不依赖任何父目录布局。RoboCasa365 数据、GR00T checkpoint 和 RoboCasa 版本的
 Isaac-GR00T 均作为显式外部资源，通过环境变量或本地 `.env` 提供。
 
+## 研究目标与整体框架
+
+本研究的上层模块会在**每个子任务开始时调用一次视频生成模型**，得到该子任务从开始到
+完成的参考视频。下层执行策略不直接接收整段参考视频，而是由一个 progress localizer 将
+当前观测与参考视频对齐，输出当前子任务内的连续进度：
+
+\[
+p_t \in [0,1].
+\]
+
+系统同时维护当前的 ordinal subtask index：
+
+\[
+k_t \in \{0,\ldots,K-1\}.
+\]
+
+然后把 `(k_t, p_t)` 作为两个额外 robot-state 条件输入 GR00T，让同一个视觉状态和完整任务
+语言在不同执行阶段产生不同的 action chunk：
+
+```text
+完整 composite instruction ───────────────────────────────┐
+当前三视角 RGB + robot state ─────────────────────────────┤
+                                                         ▼
+子任务开始时生成一次参考视频 ──► progress localizer ──► p_t
+                                             stage manager ──► k_t
+                                                         │
+robot state[0:20] + stage[20] + progress[21] ────────────┤
+                                                         ▼
+                                              GR00T N1.5 policy
+                                                         │
+                                                         ▼
+                                               16-step action chunk
+```
+
+参考视频在这个方法中只负责产生 progress scalar；视频 pixels/features **不会直接拼到 VLA
+输入中**。因此参考视频的时间长度与 16-step action chunk 不需要逐帧一一对齐。每次策略请求
+使用当前时刻的 `(k_t,p_t)`，预测并执行一个 16-step chunk，然后在下一次请求前重新估计进度。
+
+### 为什么采用这条路线
+
+此前 latent world model 路线在 demonstration-only 数据上能学到平均运动模式，但 validation
+上难以根据具体 state-action 判断正确的运动方向；要继续该路线需要额外收集带反事实覆盖的
+rollout 数据。这个仓库实现的是另一条不训练 latent world model 的路线：直接告诉 VLA 当前
+处于哪个子任务、子任务内部进行到哪里，检验这些阶段信息能否提高闭环成功率。
+
+本仓库与 latent world model、CEM 和 residual-action 方法没有代码依赖，也不应把它们重新
+混入当前 MVP。
+
+## 研究假设与实验阶段
+
+核心假设是：当前 observation、robot state 和完整 composite instruction 对动作选择仍存在
+temporal aliasing；显式加入 coarse stage 与 continuous within-stage progress 后，GR00T 可以
+更可靠地选择当前应执行的动作。
+
+实验按以下阶段推进：
+
+1. **离线 continuation training**：从 demonstration segment 构造 oracle `k_t` 与 `p_t`，训练
+   conditioned GR00T。第一版使用干净的 stride-8 reference-grid progress。
+2. **离线条件敏感性**：在 validation 上比较正确条件、固定 progress、shuffled stage/progress；
+   确认模型不是忽略两个新维度。
+3. **Oracle closed-loop MVP**：仿真器提供正确 stage/progress，比较 parent GR00T 与 conditioned
+   GR00T 的四任务成功率。当前阶段允许使用 oracle 信息，目标是先证明阶段信息确实有价值。
+4. **Video-progress rollout**：每个子任务只生成一次参考视频，用 progress localizer 替代 oracle
+   progress；stage controller 根据连续进度单调推进。
+5. **鲁棒性实验**：在干净 MVP 有正信号后，再加入 `±1` reference-node progress noise、多 seed
+   和 progress localizer 误差。
+
+第一阶段的成功条件不是单纯看 training loss，而是同时满足：
+
+- validation correct-condition loss 不劣于并最好低于 counterfactual condition；
+- 改变 stage/progress 会系统性改变 action prediction；
+- oracle closed-loop success rate 高于同一 parent checkpoint；
+- 最终 video-progress rollout 尽可能接近 oracle-progress 上限。
+
+## 当前实现边界
+
+已经实现：
+
+- 固定 episode split 和 per-frame oracle stage/progress index；
+- 父 checkpoint normalization 下的 64-D state 条件注入；
+- 四任务等权 sampler、两卡 continuation trainer、validation/checkpoint/resume；
+- counterfactual condition 离线评估；
+- conditioned GR00T policy wrapper；
+- 只允许 hold 或 `+1` 的 monotonic stage controller。
+
+尚未实现：
+
+- 上层子任务视频生成模型；
+- 从当前图像和参考视频估计 `p_t` 的 progress localizer；
+- 完整 RoboCasa online rollout/evaluation driver；
+- 正式 1000-step continuation checkpoint。
+
+HPC 上的 Codex 不应假定这些缺失模块已经存在。当前仓库首先负责跑通 oracle-conditioned
+continuation；video generator 和 progress localizer 是后续通过相同 `(k_t,p_t)` 接口接入的模块。
+
+## 已固定的设计决定
+
+除非新的实验明确要求，不要擅自改变以下设置：
+
+| 项目 | 固定设置 |
+|---|---|
+| Base policy | GR00T N1.5 target post-training `checkpoint-60000` |
+| VLA visual input | `panda_omron` 原生 left/right/wrist 三视角 |
+| Language | 完整 composite instruction |
+| State condition | ordinal stage + continuous progress 两个维度 |
+| State shape | 保持 64D，动态写入前两个空 slot，不扩 projector |
+| Stage normalization | 固定 `Kmax=5` 映射到 `[-1,1]` |
+| Progress target | 子任务内 stride-8 reference grid，连续值而非分类 |
+| Action horizon | 预测并执行 16 steps；不在子任务边界截断 |
+| Task sampling | 四任务各 25%，任务内均匀采 frame |
+| Trainable modules | 冻结 visual/language backbone；训练 action-side projector、VLLN/self-attention、DiT |
+| Data split | 100 train / 10 validation / 20 locked test episodes per task |
+| Test policy | 正式模型选择期间不得读取或调参 test split |
+| Stage transition | progress `>=0.9` 连续两次后只允许 `k→k+1`，禁止回退和跳级 |
+
+HPC GPU 数量变化时可以调整 per-device batch 与 gradient accumulation，但第一轮仍应保持
+effective global batch 128，从而不改变优化语义。
+
+## 给新 Codex 的接手顺序
+
+如果这是 HPC Codex 第一次看到项目，应按以下顺序工作：
+
+1. 阅读本 README、`configs/mvp.json`、`THIRD_PARTY.md` 和 `SMOKE_VALIDATION.md`。
+2. 复制 `.env.example` 为 `.env`，只填写 HPC 上的外部资源绝对路径。
+3. 运行 `python scripts/check_environment.py`，确认 GR00T commit、Transformers 和 GPU。
+4. 运行 `python -m pytest -q`，再生成索引并运行 `scripts/smoke_dataset.py`。
+5. 先做 20-step 多卡 smoke，记录 peak memory、samples/s、optimizer-step time。
+6. 没有用户明确确认时，不启动正式 1000-step 训练，不访问 locked test，不改固定设计。
+7. 正式训练完成后先运行 offline condition sensitivity，再决定是否进行 oracle rollout。
+
 ## 方法与数据合同
 
 每个 active-subtask control frame 构成一个训练样本：
