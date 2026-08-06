@@ -12,3 +12,4 @@ configs/local*.json
 artifacts/indices/*.jsonl
 artifacts/indices/summary.json
 outputs/
+transfer/**/*.tar.zst

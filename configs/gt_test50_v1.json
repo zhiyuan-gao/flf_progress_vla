@@ -1,0 +1,118 @@
+{
+  "version": 1,
+  "name": "gt_test50_v1",
+  "description": "Frozen 50-episode-per-task held-out split for paired GT-video-conditioned evaluation. Includes all 20 episodes from the original test split plus 30 deterministically selected previously unused episodes per task.",
+  "source_split_config": "configs/robocasa365_four_task_split_100.json",
+  "selection": {
+    "seed": 20260805,
+    "namespace": "gt_test50_v1",
+    "algorithm": "For each eligible episode e, compute lowercase hex SHA-256 of UTF-8 string gt_test50_v1|20260805|{task}|{e:06d}; sort by (digest, episode) and select the first 30.",
+    "eligible_rule": "All episode_index values in meta/episodes.jsonl excluding the union of source train, val, and test splits.",
+    "source_test_count": 20,
+    "additional_count": 30,
+    "total_per_task": 50
+  },
+  "tasks": {
+    "PreSoakPan": {
+      "dataset": {
+        "relative_id": "v1.0/target/composite/PreSoakPan/20250809/lerobot",
+        "total_episodes": 501,
+        "meta_info_sha256": "04938f8f15562b0924553c19a0b0bc21551d506dd6251ca60876617a694dc728",
+        "meta_episodes_sha256": "3b7eb69a2f5d3025722d57c83b072679318ec6a85e904158f4ec3b5e48088dd2"
+      },
+      "source_test_episodes": [
+        2, 4, 21, 37, 86, 125, 201, 205, 215, 318,
+        348, 356, 366, 377, 397, 420, 451, 454, 457, 491
+      ],
+      "additional_episodes": [
+        16, 49, 80, 88, 138, 153, 172, 186, 198, 207,
+        224, 247, 253, 260, 268, 271, 273, 301, 307, 313,
+        322, 344, 361, 411, 416, 417, 428, 458, 486, 487
+      ],
+      "episodes": [
+        2, 4, 16, 21, 37, 49, 80, 86, 88, 125,
+        138, 153, 172, 186, 198, 201, 205, 207, 215, 224,
+        247, 253, 260, 268, 271, 273, 301, 307, 313, 318,
+        322, 344, 348, 356, 361, 366, 377, 397, 411, 416,
+        417, 420, 428, 451, 454, 457, 458, 486, 487, 491
+      ],
+      "episodes_sha256": "b2a799bf441b8b806074e7fb5937c2fd21dfea66e20dcfc001079437d6cc2e70"
+    },
+    "KettleBoiling": {
+      "dataset": {
+        "relative_id": "v1.0/target/composite/KettleBoiling/20250814/lerobot",
+        "total_episodes": 501,
+        "meta_info_sha256": "5c59fc4a99e61a60d934cc539ea985b7a6f01c5a4528785d838c32d66471d627",
+        "meta_episodes_sha256": "1d239584f74b4e2d07edc9430fe443a2eeed2c90e87228b14468ab516c921dc9"
+      },
+      "source_test_episodes": [
+        20, 26, 28, 43, 65, 109, 143, 151, 171, 178,
+        180, 270, 309, 322, 376, 379, 384, 421, 440, 486
+      ],
+      "additional_episodes": [
+        37, 72, 78, 89, 92, 94, 96, 98, 103, 125,
+        135, 185, 189, 192, 200, 215, 267, 278, 294, 316,
+        319, 381, 401, 413, 418, 452, 467, 474, 485, 491
+      ],
+      "episodes": [
+        20, 26, 28, 37, 43, 65, 72, 78, 89, 92,
+        94, 96, 98, 103, 109, 125, 135, 143, 151, 171,
+        178, 180, 185, 189, 192, 200, 215, 267, 270, 278,
+        294, 309, 316, 319, 322, 376, 379, 381, 384, 401,
+        413, 418, 421, 440, 452, 467, 474, 485, 486, 491
+      ],
+      "episodes_sha256": "8e41a6a4c6bd9d1d3d105f68e770416337793338d4ba4a346168b4c1ced295f0"
+    },
+    "LoadDishwasher": {
+      "dataset": {
+        "relative_id": "v1.0/target/composite/LoadDishwasher/20250811/lerobot",
+        "total_episodes": 501,
+        "meta_info_sha256": "bd1b1b0d587ea64793f67207b9fa1f963692ef29716c19eec042daa03e5d6799",
+        "meta_episodes_sha256": "4aba9560f81fd6c4fb29c0531ad00456270af62ff20ed487c3018189161ec885"
+      },
+      "source_test_episodes": [
+        19, 23, 45, 113, 128, 143, 152, 197, 226, 234,
+        316, 323, 337, 406, 409, 433, 454, 465, 474, 491
+      ],
+      "additional_episodes": [
+        15, 37, 49, 55, 65, 78, 85, 99, 148, 161,
+        165, 192, 193, 215, 270, 273, 274, 285, 321, 328,
+        334, 343, 349, 368, 393, 415, 427, 466, 467, 485
+      ],
+      "episodes": [
+        15, 19, 23, 37, 45, 49, 55, 65, 78, 85,
+        99, 113, 128, 143, 148, 152, 161, 165, 192, 193,
+        197, 215, 226, 234, 270, 273, 274, 285, 316, 321,
+        323, 328, 334, 337, 343, 349, 368, 393, 406, 409,
+        415, 427, 433, 454, 465, 466, 467, 474, 485, 491
+      ],
+      "episodes_sha256": "3d3620f73bf568f460a944bc409d983c727217a28f9ed394889f8f04f111d11e"
+    },
+    "RinseSinkBasin": {
+      "dataset": {
+        "relative_id": "v1.0/target/composite/RinseSinkBasin/20250816/lerobot",
+        "total_episodes": 509,
+        "meta_info_sha256": "fade4b16265d675f3acb23a7daa62d2d593f6d427d7bc9dfce0c78d675c8c20c",
+        "meta_episodes_sha256": "70cf6baa211ace085cdabfe250cf5978a312ff3bb8ae8f70ca4e6c1ab02fe36d"
+      },
+      "source_test_episodes": [
+        32, 51, 76, 77, 91, 94, 130, 163, 194, 220,
+        296, 315, 330, 353, 354, 404, 408, 416, 469, 477
+      ],
+      "additional_episodes": [
+        18, 47, 60, 73, 79, 97, 100, 107, 115, 132,
+        169, 208, 209, 237, 238, 241, 248, 287, 288, 300,
+        305, 331, 370, 387, 406, 424, 446, 449, 453, 459
+      ],
+      "episodes": [
+        18, 32, 47, 51, 60, 73, 76, 77, 79, 91,
+        94, 97, 100, 107, 115, 130, 132, 163, 169, 194,
+        208, 209, 220, 237, 238, 241, 248, 287, 288, 296,
+        300, 305, 315, 330, 331, 353, 354, 370, 387, 404,
+        406, 408, 416, 424, 446, 449, 453, 459, 469, 477
+      ],
+      "episodes_sha256": "91f86b5769576acc97c24f258333598d4a20243fa2f907c5c52de79ab2dc2984"
+    }
+  },
+  "all_episode_sets_sha256": "7e333eaff88e985e6bfd9772ab2c2303e8a2e920d025e3cbe673e9c70a6ea1d6"
+}

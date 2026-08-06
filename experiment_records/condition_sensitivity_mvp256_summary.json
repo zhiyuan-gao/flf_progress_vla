@@ -1,0 +1,103 @@
+{
+  "protocol": "condition_sensitivity_mvp256_v1",
+  "created_at": "2026-08-05T19:12:18.596227+00:00",
+  "checkpoint": "outputs/mvp_continuation/checkpoint-10000",
+  "validation_index": "artifacts/indices/val.jsonl",
+  "seed": 20260805,
+  "sampling": {
+    "total_samples": 256,
+    "samples_per_task": 64,
+    "progress_bins": 4,
+    "episodes_per_task": 10,
+    "full_action_horizon_only": true
+  },
+  "variants": {
+    "correct": "correct stage and correct progress",
+    "wrong_progress": "correct stage and within-stage progress from a different validation episode",
+    "wrong_stage": "different valid stage from the same task and correct progress"
+  },
+  "controls": "Within each task batch, RGB observations, robot state, language, target action, flow-matching noise, and diffusion timestep were identical across variants.",
+  "execution": {
+    "gpus": 4,
+    "task_to_gpu": {
+      "PreSoakPan": 0,
+      "KettleBoiling": 1,
+      "LoadDishwasher": 2,
+      "RinseSinkBasin": 3
+    },
+    "batch_size_per_gpu": 32,
+    "wall_seconds": 26.031986236572266,
+    "peak_allocated_memory_mib_per_gpu": {
+      "PreSoakPan": 16453.869140625,
+      "KettleBoiling": 16477.66796875,
+      "LoadDishwasher": 16498.419921875,
+      "RinseSinkBasin": 16477.66796875
+    }
+  },
+  "overall": {
+    "flow_loss": {
+      "correct": 0.05164338741451502,
+      "wrong_progress": 0.05554266180843115,
+      "wrong_stage": 0.05124477902427316
+    },
+    "relative_delta_from_correct": {
+      "wrong_progress": 0.07550384645799184,
+      "wrong_stage": -0.00771847878688584
+    }
+  },
+  "per_task": {
+    "PreSoakPan": {
+      "flow_loss": {
+        "correct": 0.03921898268163204,
+        "wrong_progress": 0.04133466072380543,
+        "wrong_stage": 0.03865049406886101
+      },
+      "relative_delta_from_correct": {
+        "wrong_progress": 0.05394525552454602,
+        "wrong_stage": -0.014495241179146705
+      }
+    },
+    "KettleBoiling": {
+      "flow_loss": {
+        "correct": 0.036047810688614845,
+        "wrong_progress": 0.04385080561041832,
+        "wrong_stage": 0.03585188649594784
+      },
+      "relative_delta_from_correct": {
+        "wrong_progress": 0.21646238073115304,
+        "wrong_stage": -0.0054351204393360605
+      }
+    },
+    "LoadDishwasher": {
+      "flow_loss": {
+        "correct": 0.048538465052843094,
+        "wrong_progress": 0.05197345279157162,
+        "wrong_stage": 0.047612372785806656
+      },
+      "relative_delta_from_correct": {
+        "wrong_progress": 0.07076836350281995,
+        "wrong_stage": -0.019079554040866666
+      }
+    },
+    "RinseSinkBasin": {
+      "flow_loss": {
+        "correct": 0.08276829123497009,
+        "wrong_progress": 0.08501172810792923,
+        "wrong_stage": 0.08286436274647713
+      },
+      "relative_delta_from_correct": {
+        "wrong_progress": 0.027105028260040624,
+        "wrong_stage": 0.0011607284634437822
+      }
+    }
+  },
+  "mvp_threshold": {
+    "relative_loss_delta": 0.01,
+    "progress_signal": true,
+    "stage_signal": false,
+    "interpretation": "detectable_progress_signal_only"
+  },
+  "authoritative_full_report": "outputs/condition_sensitivity_mvp256/report.json",
+  "authoritative_full_report_sha256": "a2b637ba6742c643fa53e9755ee523d83c51c34dfa7810f9a61adf3aaff43154",
+  "interpretation_limit": "This paired offline diagnostic shows detectable use of progress but no detectable incremental stage signal under this protocol. It does not by itself establish closed-loop causal benefit."
+}
