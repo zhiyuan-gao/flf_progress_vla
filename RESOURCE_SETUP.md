@@ -228,6 +228,7 @@ set -a
 set +a
 "$STAGE_STATE_PYTHON" scripts/check_environment.py
 "$STAGE_STATE_PYTHON" scripts/build_indices.py
+"$STAGE_STATE_PYTHON" scripts/build_indices.py --max-episodes-per-task 1
 "$STAGE_STATE_PYTHON" scripts/smoke_dataset.py
 "$STAGE_STATE_PYTHON" -m pytest -q
 ```

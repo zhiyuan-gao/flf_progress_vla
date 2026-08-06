@@ -84,6 +84,10 @@ set +a
 "$STAGE_STATE_PYTHON" scripts/build_indices.py \
   --config configs/semantic_goal1.json
 
+"$STAGE_STATE_PYTHON" scripts/build_indices.py \
+  --config configs/semantic_goal1.json \
+  --max-episodes-per-task 1
+
 "$STAGE_STATE_PYTHON" scripts/build_goal_cache.py \
   --config configs/semantic_goal1.json
 

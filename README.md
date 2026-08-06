@@ -6,6 +6,10 @@ stage-state + continuous video progress continuation fine-tuning。
 仓库不依赖任何父目录布局。RoboCasa365 数据、GR00T checkpoint 和 RoboCasa 版本的
 Isaac-GR00T 均作为显式外部资源，通过环境变量或本地 `.env` 提供。
 
+> 在一台没有代码、数据、权重或 Python 环境的新服务器上部署时，请从
+> [`INSTALL_NEW_SERVER.md`](INSTALL_NEW_SERVER.md) 开始，按顺序完成训练环境、固定资源、
+> smoke、正式训练和可选的 RoboCasa closed-loop 推理安装。
+>
 > 第二版“完整任务 + 语义子任务 + 1/3 张目标图像 + exact progress + 显式 HOLD”的实现与
 > 运行命令见 [`SEMANTIC_GOAL_MVP.md`](SEMANTIC_GOAL_MVP.md)。本文其余部分保留第一版
 > ordinal-stage 实验的设计和复现记录。
@@ -211,7 +215,7 @@ python3.10 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e 'external/Isaac-GR00T[base]'
-python -m pip install -e '.[dev]'
+python -m pip install -e '.[train,dev]'
 ```
 
 在已经配置好的 GR00T/HPC 环境中，可以使用 `python -m pip install -e . --no-deps`，避免
