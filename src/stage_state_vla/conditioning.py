@@ -19,6 +19,11 @@ class ConditionSlots:
     progress: int
 
 
+def find_progress_slot(state_mask: Any) -> int:
+    """Return the first unused state dimension for progress-only conditioning."""
+    return find_condition_slots(state_mask, required=1).stage
+
+
 def normalize_stage(stage_index: int | np.ndarray, max_stages: int = 5) -> Any:
     if max_stages < 2:
         raise ValueError("max_stages must be at least 2")
@@ -129,6 +134,42 @@ def inject_stage_progress(
     output["state"] = state
     output["state_mask"] = mask
     return output, slots
+
+
+def inject_progress(
+    sample: dict[str, Any],
+    progress: float | np.ndarray,
+    *,
+    copy: bool = True,
+) -> tuple[dict[str, Any], int]:
+    """Add only within-subtask progress to the first unused GR00T state dimension."""
+    if "state" not in sample or "state_mask" not in sample:
+        raise KeyError("sample must contain transformed GR00T state and state_mask")
+    state = sample["state"]
+    mask = sample["state_mask"]
+    slot = find_progress_slot(mask)
+
+    if copy:
+        if hasattr(state, "clone"):
+            state = state.clone()
+            mask = mask.clone()
+        else:
+            state = np.array(state, copy=True)
+            mask = np.array(mask, copy=True)
+
+    prefix_shape = tuple(state.shape[:-1])
+    progress_values = _broadcast_condition(normalize_progress(progress), prefix_shape)
+    if hasattr(state, "new_tensor"):
+        state[..., slot] = state.new_tensor(progress_values)
+        mask[..., slot] = True
+    else:
+        state[..., slot] = progress_values
+        mask[..., slot] = True
+
+    output = dict(sample)
+    output["state"] = state
+    output["state_mask"] = mask
+    return output, slot
 
 
 def overwrite_stage_progress(

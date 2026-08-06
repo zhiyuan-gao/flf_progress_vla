@@ -19,6 +19,9 @@ def test_same_stage_name_is_split_by_subtask_index(tmp_path: Path):
     (dataset / "meta").mkdir(parents=True)
     (dataset / "data/chunk-000").mkdir(parents=True)
     tasks = [
+        {"task_index": 0, "task": "do the complete task"},
+        {"task_index": 1, "task": "complete the first subtask"},
+        {"task_index": 2, "task": "complete the second subtask"},
         {"task_index": 5, "task": "done"},
         {"task_index": 8, "task": "execute"},
     ]
@@ -29,6 +32,8 @@ def test_same_stage_name_is_split_by_subtask_index(tmp_path: Path):
         {
             "frame_index": list(range(7)),
             "subtask_idx": [0, 0, 0, 1, 1, 1, 2],
+            "annotation.human.task_description": [0] * 7,
+            "annotation.human.subtask": [1, 1, 1, 2, 2, 2, 2],
             "annotation.human.subtask_stage": [8, 8, 8, 8, 8, 8, 5],
         }
     )
@@ -44,3 +49,6 @@ def test_same_stage_name_is_split_by_subtask_index(tmp_path: Path):
     assert [row.stage_index for row in records] == [0, 0, 0, 1, 1, 1]
     assert records[2].exact_progress == 1.0
     assert records[3].exact_progress == 0.0
+    assert records[0].task_description == "do the complete task"
+    assert records[0].subtask_description == "complete the first subtask"
+    assert records[3].subtask_description == "complete the second subtask"

@@ -11,5 +11,7 @@ external/
 configs/local*.json
 artifacts/indices/*.jsonl
 artifacts/indices/summary.json
+artifacts/semantic_goal_indices/
+artifacts/semantic_goal_cache/
 outputs/
 transfer/**/*.tar.zst

@@ -43,6 +43,8 @@ class FrameRecord:
     grid_node: int
     grid_nodes: int
     grid_progress: float
+    task_description: str = ""
+    subtask_description: str = ""
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -107,7 +109,13 @@ def build_episode_records(
     stage_count: int,
     reference_stride: int = 8,
 ) -> list[FrameRecord]:
-    columns = ["frame_index", "subtask_idx", "annotation.human.subtask_stage"]
+    columns = [
+        "frame_index",
+        "subtask_idx",
+        "annotation.human.task_description",
+        "annotation.human.subtask",
+        "annotation.human.subtask_stage",
+    ]
     table = pd.read_parquet(episode_parquet(dataset, episode), columns=columns)
     frame_indices = table["frame_index"].to_numpy(dtype=np.int64)
     if not np.array_equal(frame_indices, np.arange(len(table), dtype=np.int64)):
@@ -115,6 +123,8 @@ def build_episode_records(
     names = load_task_names(dataset)
     stages = table["annotation.human.subtask_stage"].to_numpy(dtype=np.int64)
     subtasks = table["subtask_idx"].to_numpy(dtype=np.int64)
+    task_descriptions = table["annotation.human.task_description"].to_numpy(dtype=np.int64)
+    subtask_descriptions = table["annotation.human.subtask"].to_numpy(dtype=np.int64)
     records: list[FrameRecord] = []
     observed_active: set[int] = set()
     for start, end, stage_id, stage_index in contiguous_segments(stages, subtasks):
@@ -126,6 +136,15 @@ def build_episode_records(
                 f"{task} episode {episode}: stage index {stage_index} outside [0,{stage_count})"
             )
         observed_active.add(stage_index)
+        task_ids = set(task_descriptions[start : end + 1].tolist())
+        subtask_ids = set(subtask_descriptions[start : end + 1].tolist())
+        if len(task_ids) != 1 or len(subtask_ids) != 1:
+            raise ValueError(
+                f"{task} episode {episode} stage {stage_index} has non-constant language: "
+                f"task_ids={sorted(task_ids)}, subtask_ids={sorted(subtask_ids)}"
+            )
+        task_description = names[next(iter(task_ids))]
+        subtask_description = names[next(iter(subtask_ids))]
         grid = reference_grid(start, end, reference_stride)
         duration = max(end - start, 1)
         for frame in range(start, end + 1):
@@ -147,6 +166,8 @@ def build_episode_records(
                     grid_node=node,
                     grid_nodes=grid.size,
                     grid_progress=grid_progress,
+                    task_description=task_description,
+                    subtask_description=subtask_description,
                 )
             )
     expected = set(range(stage_count))

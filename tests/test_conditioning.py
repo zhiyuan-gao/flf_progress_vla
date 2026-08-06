@@ -6,6 +6,7 @@ import pytest
 from stage_state_vla.conditioning import (
     apply_episode_tail_mask,
     find_injected_condition_slots,
+    inject_progress,
     inject_stage_progress,
     normalize_stage,
     overwrite_stage_progress,
@@ -33,6 +34,13 @@ def test_overwrite_changes_only_condition_values():
     changed = overwrite_stage_progress(sample, stage_index=4, progress=1.0)
     np.testing.assert_allclose(changed["state"][0, 20:22], [1.0, 1.0])
     np.testing.assert_allclose(changed["state"][..., :20], sample["state"][..., :20])
+
+
+def test_progress_only_uses_one_empty_state_dimension():
+    sample, slot = inject_progress(base_sample(), progress=0.75)
+    assert slot == 20
+    assert sample["state_mask"].sum() == 21
+    assert sample["state"][0, slot] == pytest.approx(0.5)
 
 
 def test_stage_range_and_episode_tail_mask():

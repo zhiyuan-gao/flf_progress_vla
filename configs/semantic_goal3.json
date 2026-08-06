@@ -1,0 +1,92 @@
+{
+  "version": 2,
+  "method_family": "semantic_goal",
+  "method": "full task plus semantic subtask, three endpoint images, exact progress, and HOLD padding",
+  "resources": {
+    "gr00t_root": "${GR00T_ROOT}",
+    "data_root": "${ROBOCASA365_DATA_ROOT}",
+    "split_config": "configs/robocasa365_four_task_split_100.json",
+    "base_checkpoint": "${GR00T_BASE_CHECKPOINT}"
+  },
+  "index_dir": "artifacts/semantic_goal_indices",
+  "output_dir": "outputs/semantic_goal3_continuation",
+  "tasks": [
+    "PreSoakPan",
+    "KettleBoiling",
+    "LoadDishwasher",
+    "RinseSinkBasin"
+  ],
+  "stage_counts": {
+    "PreSoakPan": 5,
+    "KettleBoiling": 3,
+    "LoadDishwasher": 5,
+    "RinseSinkBasin": 2
+  },
+  "goal": {
+    "variant": "goal3",
+    "goal_image_count": 3,
+    "cache_dir": "artifacts/semantic_goal_cache",
+    "endpoint": "last_valid_subtask_frame",
+    "camera_order": [
+      "current_left",
+      "current_right",
+      "current_wrist",
+      "goal_left",
+      "goal_right",
+      "goal_wrist"
+    ]
+  },
+  "condition": {
+    "reference_stride": 8,
+    "control_hz": 20,
+    "progress_source": "exact",
+    "progress_jitter_frames": 4,
+    "completion_threshold": 0.9,
+    "completion_confirmations": 2,
+    "localizer": {
+      "type": "monotonic_subsequence_dtw",
+      "camera_keys": [
+        "video.robot0_agentview_left"
+      ],
+      "feature_source": "rgb32",
+      "image_size": 32,
+      "query_length": 8,
+      "query_stride": 8,
+      "motion_weight": 0.0,
+      "stay_penalty": 0.0,
+      "jump_penalty": 0.0,
+      "hard_max_reference_span": null
+    }
+  },
+  "action": {
+    "padding": "explicit_hold",
+    "max_execute_steps": 8,
+    "discard_chunk_on_stage_advance": true
+  },
+  "model": {
+    "data_config": "panda_omron",
+    "embodiment_tag": "new_embodiment",
+    "action_horizon": 16,
+    "tune_visual": false,
+    "tune_llm": false,
+    "tune_projector": true,
+    "tune_diffusion_model": true,
+    "compute_dtype": "bfloat16"
+  },
+  "training": {
+    "seed": 42,
+    "max_steps": 10000,
+    "formal_world_size": 4,
+    "global_batch_size": 128,
+    "per_device_batch_size": 16,
+    "learning_rate": 0.00003,
+    "weight_decay": 0.00001,
+    "warmup_ratio": 0.05,
+    "logging_steps": 10,
+    "eval_steps": 250,
+    "save_steps": 500,
+    "save_total_limit": 7,
+    "dataloader_num_workers": 8,
+    "video_backend": "opencv"
+  }
+}

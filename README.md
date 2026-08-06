@@ -6,6 +6,10 @@ stage-state + continuous video progress continuation fine-tuning。
 仓库不依赖任何父目录布局。RoboCasa365 数据、GR00T checkpoint 和 RoboCasa 版本的
 Isaac-GR00T 均作为显式外部资源，通过环境变量或本地 `.env` 提供。
 
+> 第二版“完整任务 + 语义子任务 + 1/3 张目标图像 + exact progress + 显式 HOLD”的实现与
+> 运行命令见 [`SEMANTIC_GOAL_MVP.md`](SEMANTIC_GOAL_MVP.md)。本文其余部分保留第一版
+> ordinal-stage 实验的设计和复现记录。
+
 ## 研究目标与整体框架
 
 本研究的上层模块会在**每个子任务开始时调用一次视频生成模型**，得到该子任务从开始到

@@ -6,10 +6,13 @@ from stage_state_vla.index import FrameRecord
 from stage_state_vla.inference import (
     ConditionedChunkPredictor,
     ReferenceClockConditionSource,
+    ReferenceVideoConditionSource,
+    SemanticGoalChunkPredictor,
     add_observation_horizon,
     concatenate_action_chunk,
     split_action,
 )
+from stage_state_vla.reference_video import DTWProgressLocalization
 
 
 def record(frame: int, stage: int, progress: float) -> FrameRecord:
@@ -29,6 +32,8 @@ def record(frame: int, stage: int, progress: float) -> FrameRecord:
         grid_node=round(progress * 2),
         grid_nodes=3,
         grid_progress=progress,
+        task_description="do the complete task",
+        subtask_description=f"complete stage {stage}",
     )
 
 
@@ -74,3 +79,72 @@ def test_action_conversion_and_conditioned_predictor():
     predicted, condition = predictor.predict({"state.arm": np.zeros(2)}, 0)
     assert predicted.shape == (16, 12)
     assert condition.source == "reference_clock"
+
+
+def test_semantic_predictor_passes_text_goal_and_progress():
+    action_dict = {
+        "action.end_effector_position": np.zeros((16, 3)),
+        "action.end_effector_rotation": np.zeros((16, 3)),
+        "action.gripper_close": np.zeros((16, 1)),
+        "action.base_motion": np.zeros((16, 4)),
+        "action.control_mode": np.zeros((16, 1)),
+    }
+
+    class Policy:
+        def get_action_with_semantic_goal(self, observations, **condition):
+            assert observations["state.arm"].shape == (1, 2)
+            assert condition["video_progress"] == 0.0
+            assert condition["task_description"] == "do the complete task"
+            assert condition["subtask_description"] == "complete stage 0"
+            assert set(condition["goal_images"]) == {"video.goal"}
+            return action_dict
+
+    class Store:
+        def load(self, row):
+            assert row.stage_index == 0
+            return {"video.goal": np.zeros((2, 2, 3), dtype=np.uint8)}
+
+    rows = [record(0, 0, 0.0), record(1, 0, 0.1), record(10, 1, 0.0)]
+    predictor = SemanticGoalChunkPredictor(
+        Policy(), ReferenceClockConditionSource(rows), rows, Store()
+    )
+    chunk, condition = predictor.predict({"state.arm": np.zeros(2)}, 0)
+    assert chunk.shape == (16, 12)
+    assert condition.stage_index == 0
+
+
+def test_repeated_policy_call_does_not_reuse_one_dtw_sample_as_two_confirmations():
+    class Localizer:
+        def __init__(self):
+            self.sample_step = 8
+
+        def localize(self, stage_index, observation, control_step):
+            return DTWProgressLocalization(
+                stage_index=stage_index,
+                start_index=0,
+                end_index=9,
+                node_frame=72,
+                progress=0.95,
+                path=(9,),
+                query_steps=1,
+                sample_step=self.sample_step,
+                mean_cost=0.0,
+                confidence_margin=1.0,
+            )
+
+        def reset(self, stage_index):
+            pass
+
+        def observe(self, stage_index, observation, control_step, force=False):
+            return True
+
+    localizer = Localizer()
+    source = ReferenceVideoConditionSource(localizer, num_stages=2, confirmations=2)
+    first = source.estimate({}, 8)
+    repeated = source.estimate({}, 8)
+    assert first.details["completion_streak"] == 1
+    assert repeated.details["completion_streak"] == 1
+    assert not repeated.advanced
+    localizer.sample_step = 16
+    advanced = source.estimate({}, 16)
+    assert advanced.advanced and advanced.stage_index == 1

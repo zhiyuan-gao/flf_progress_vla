@@ -12,8 +12,16 @@ from typing import Any, Sequence
 import numpy as np
 from torch.utils.data import Dataset
 
-from .conditioning import apply_episode_tail_mask, inject_stage_progress
+from .conditioning import apply_episode_tail_mask, inject_progress, inject_stage_progress
 from .index import FrameRecord, read_jsonl
+from .semantic_goal import (
+    GoalImageStore,
+    append_goal_time_step,
+    apply_explicit_hold_padding,
+    exact_progress_with_frame_jitter,
+    make_semantic_goal_transform,
+    semantic_prompt,
+)
 
 
 def deterministic_node_shift(seed: int, epoch: int, index: int, radius: int) -> int:
@@ -183,6 +191,134 @@ def load_stage_dataset(
         max_stages=max_stages,
         progress_source=progress_source,
         progress_noise_nodes=progress_noise_nodes,
+        seed=seed,
+        action_horizon=action_horizon,
+    )
+
+
+class SemanticGoalDataset(Dataset):
+    """Goal-conditioned subtask samples with exact progress and explicit HOLD tails."""
+
+    def __init__(
+        self,
+        records: Sequence[FrameRecord],
+        base_datasets: dict[str, Any],
+        transforms: dict[str, Any],
+        *,
+        goal_store: GoalImageStore,
+        goal_image_count: int,
+        progress_jitter_frames: int = 4,
+        seed: int = 42,
+        action_horizon: int = 16,
+    ) -> None:
+        if goal_image_count not in {1, 3}:
+            raise ValueError("goal_image_count must be 1 or 3")
+        self.records = list(records)
+        self.base_datasets = dict(base_datasets)
+        self.transforms = dict(transforms)
+        self.goal_store = goal_store
+        self.goal_image_count = int(goal_image_count)
+        self.progress_jitter_frames = int(progress_jitter_frames)
+        self.seed = int(seed)
+        self.action_horizon = int(action_horizon)
+        self.epoch = 0
+        if not self.records:
+            raise ValueError("SemanticGoalDataset requires at least one record")
+        if any(not row.task_description or not row.subtask_description for row in self.records):
+            raise ValueError("semantic-goal indices must contain task and subtask descriptions")
+        tasks = {row.task for row in self.records}
+        if tasks - self.base_datasets.keys() or tasks - self.transforms.keys():
+            raise KeyError("every semantic-goal task needs a base dataset and transform")
+
+    @property
+    def tag(self) -> str:
+        return next(iter(self.base_datasets.values())).tag
+
+    @property
+    def metadata(self) -> Any:
+        return next(iter(self.base_datasets.values())).metadata
+
+    @property
+    def task_counts(self) -> dict[str, int]:
+        return dict(Counter(row.task for row in self.records))
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = int(epoch)
+        for dataset in self.base_datasets.values():
+            dataset.set_epoch(epoch)
+
+    def __len__(self) -> int:
+        return len(self.records)
+
+    def progress_for(self, index: int) -> float:
+        return exact_progress_with_frame_jitter(
+            self.records[index],
+            seed=self.seed,
+            epoch=self.epoch,
+            index=index,
+            radius=self.progress_jitter_frames,
+        )
+
+    def __getitem__(self, index: int) -> dict[str, Any]:
+        row = self.records[index]
+        base = self.base_datasets[row.task]
+        raw = base.get_step_data(row.episode, row.frame)
+        raw["annotation.human.task_description"] = [
+            semantic_prompt(row.task_description, row.subtask_description)
+        ]
+        raw = append_goal_time_step(raw, self.goal_store.load(row))
+        valid_steps = max(
+            1,
+            min(self.action_horizon, row.segment_end - row.frame + 1),
+        )
+        raw = apply_explicit_hold_padding(
+            raw,
+            valid_steps=valid_steps,
+            action_horizon=self.action_horizon,
+        )
+        sample = self.transforms[row.task](raw)
+        sample, _ = inject_progress(sample, self.progress_for(index), copy=False)
+        return sample
+
+
+def load_semantic_goal_dataset(
+    index_path: Path,
+    *,
+    training: bool,
+    goal_cache_dir: Path,
+    goal_image_count: int,
+    video_backend: str = "opencv",
+    progress_jitter_frames: int = 4,
+    seed: int = 42,
+    action_horizon: int = 16,
+    normalization_metadata: Path | None = None,
+) -> SemanticGoalDataset:
+    records = read_jsonl(index_path)
+    bases = create_base_datasets(
+        records,
+        training=training,
+        video_backend=video_backend,
+        normalization_metadata=normalization_metadata,
+    )
+    metadata = None
+    if normalization_metadata is not None:
+        from gr00t.data.schema import DatasetMetadata
+
+        payload = json.loads(Path(normalization_metadata).read_text(encoding="utf-8"))
+        metadata = DatasetMetadata.model_validate(payload["new_embodiment"])
+    transforms: dict[str, Any] = {}
+    for task, base in bases.items():
+        transform = make_semantic_goal_transform(goal_image_count=goal_image_count)
+        transform.train() if training else transform.eval()
+        transform.set_metadata(copy.deepcopy(metadata or base.metadata))
+        transforms[task] = transform
+    return SemanticGoalDataset(
+        records,
+        bases,
+        transforms,
+        goal_store=GoalImageStore(goal_cache_dir),
+        goal_image_count=goal_image_count,
+        progress_jitter_frames=progress_jitter_frames if training else 0,
         seed=seed,
         action_horizon=action_horizon,
     )

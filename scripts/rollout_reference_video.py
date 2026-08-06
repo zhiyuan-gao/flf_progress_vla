@@ -28,15 +28,17 @@ from stage_state_vla.inference import (
     ConditionedChunkPredictor,
     ReferenceClockConditionSource,
     ReferenceVideoConditionSource,
+    SemanticGoalChunkPredictor,
     split_action,
 )
-from stage_state_vla.policy import make_conditioned_policy_class
+from stage_state_vla.policy import make_conditioned_policy_class, make_semantic_goal_policy_class
 from stage_state_vla.reference_video import (
     RGBReferenceEncoder,
     RollingSubsequenceDTWProgressLocalizer,
     SubsequenceDTWLocalizer,
     build_ground_truth_references,
 )
+from stage_state_vla.semantic_goal import GoalImageStore, make_semantic_goal_transform
 
 
 def parse_args() -> argparse.Namespace:
@@ -56,7 +58,7 @@ def parse_args() -> argparse.Namespace:
         choices=("reference_dtw", "reference_clock"),
         default="reference_dtw",
     )
-    parser.add_argument("--execute-steps", type=int, default=16)
+    parser.add_argument("--execute-steps", type=int, default=None)
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--denoising-steps", type=int, default=4)
     parser.add_argument("--device", default="cuda:0")
@@ -171,7 +173,12 @@ def main() -> int:
     )
     if args.task not in config["tasks"]:
         raise ValueError(f"task must be one of {config['tasks']}, got {args.task!r}")
-    if not 1 <= args.execute_steps <= int(config["model"]["action_horizon"]):
+    semantic_goal = config.get("method_family") == "semantic_goal"
+    configured_execute_steps = int(
+        config.get("action", {}).get("max_execute_steps", config["model"]["action_horizon"])
+    )
+    execute_steps = int(args.execute_steps or configured_execute_steps)
+    if not 1 <= execute_steps <= int(config["model"]["action_horizon"]):
         raise ValueError(
             f"execute-steps must be in [1, {config['model']['action_horizon']}]"
         )
@@ -211,12 +218,12 @@ def main() -> int:
             encoder=encoder,
         )
 
+    default_output_root = paths.repo_root / "outputs/reference_video_rollout"
+    if semantic_goal:
+        default_output_root = default_output_root / config["goal"]["variant"]
     output_dir = (
         args.output_dir
-        or paths.repo_root
-        / "outputs/reference_video_rollout"
-        / args.condition_source
-        / f"{args.task}_ep{episode:06d}"
+        or default_output_root / args.condition_source / f"{args.task}_ep{episode:06d}"
     ).resolve()
     summary_path = output_dir / "summary.json"
     if summary_path.exists() and not args.overwrite and not args.prepare_only:
@@ -236,7 +243,8 @@ def main() -> int:
         "query_length": query_length,
         "feature_source": localizer_cfg["feature_source"],
         "dtw": localizer_cfg,
-        "execute_steps": args.execute_steps,
+        "execute_steps": execute_steps,
+        "semantic_goal": config.get("goal"),
         "stage_count": stage_count,
         "references": reference_summary(references),
         "prepare_only": args.prepare_only,
@@ -268,16 +276,21 @@ def main() -> int:
         torch.cuda.manual_seed_all(args.seed)
 
     data_config = DATA_CONFIG_MAP[config["model"]["data_config"]]
-    Policy = make_conditioned_policy_class()
+    Policy = make_semantic_goal_policy_class() if semantic_goal else make_conditioned_policy_class()
+    modality_transform = (
+        make_semantic_goal_transform(goal_image_count=int(config["goal"]["goal_image_count"]))
+        if semantic_goal
+        else data_config.transform()
+    )
     print(f"Loading conditioned checkpoint: {checkpoint}", flush=True)
     policy = Policy(
         model_path=str(checkpoint),
         modality_config=data_config.modality_config(),
-        modality_transform=data_config.transform(),
+        modality_transform=modality_transform,
         embodiment_tag=config["model"]["embodiment_tag"],
         denoising_steps=args.denoising_steps,
         device=args.device,
-        max_stages=int(condition_cfg["max_stages"]),
+        **({} if semantic_goal else {"max_stages": int(condition_cfg["max_stages"])}),
     )
 
     if args.condition_source == "reference_dtw":
@@ -299,8 +312,15 @@ def main() -> int:
             confirmations=int(condition_cfg["completion_confirmations"]),
         )
     else:
-        condition_source = ReferenceClockConditionSource(records, progress_field="grid_progress")
-    predictor = ConditionedChunkPredictor(policy, condition_source)
+        progress_field = (
+            "exact_progress" if condition_cfg.get("progress_source") == "exact" else "grid_progress"
+        )
+        condition_source = ReferenceClockConditionSource(records, progress_field=progress_field)
+    if semantic_goal:
+        goal_store = GoalImageStore((paths.repo_root / config["goal"]["cache_dir"]).resolve())
+        predictor = SemanticGoalChunkPredictor(policy, condition_source, records, goal_store)
+    else:
+        predictor = ConditionedChunkPredictor(policy, condition_source)
 
     max_steps = int(args.max_steps or get_task_horizon(args.task))
     manifest.update(
@@ -338,7 +358,7 @@ def main() -> int:
                 f"progress={condition.progress:.3f} advanced={condition.advanced}",
                 flush=True,
             )
-            for within_chunk in range(min(args.execute_steps, max_steps - step)):
+            for within_chunk in range(min(execute_steps, max_steps - step)):
                 observation, _, terminated, truncated, info = gym_env.step(
                     split_action(chunk[within_chunk])
                 )

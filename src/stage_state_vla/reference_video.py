@@ -317,6 +317,7 @@ class DTWProgressLocalization:
     progress: float
     path: tuple[int, ...]
     query_steps: int
+    sample_step: int
     mean_cost: float
     confidence_margin: float
 
@@ -411,6 +412,7 @@ class RollingSubsequenceDTWProgressLocalizer:
             progress=result.progress,
             path=result.path,
             query_steps=len(query),
+            sample_step=self._sample_steps[stage_index][-1],
             mean_cost=result.mean_cost,
             confidence_margin=result.confidence_margin,
         )

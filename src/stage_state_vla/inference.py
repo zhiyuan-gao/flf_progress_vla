@@ -11,6 +11,7 @@ import numpy as np
 from .controller import MonotonicStageController
 from .index import FrameRecord
 from .reference_video import RollingSubsequenceDTWProgressLocalizer
+from .semantic_goal import GoalImageStore
 
 
 ACTION_KEYS = (
@@ -91,6 +92,8 @@ class ReferenceVideoConditionSource:
             completion_threshold=completion_threshold,
             confirmations=confirmations,
         )
+        self._last_sample_step: int | None = None
+        self._last_decision = None
 
     def estimate(
         self, observation: Mapping[str, Any], control_step: int
@@ -98,7 +101,22 @@ class ReferenceVideoConditionSource:
         localized = self.localizer.localize(
             self.controller.stage_index, observation, control_step
         )
-        decision = self.controller.update(localized.progress)
+        fresh = localized.sample_step != self._last_sample_step
+        if fresh:
+            decision = self.controller.update(localized.progress)
+            self._last_sample_step = localized.sample_step
+            self._last_decision = decision
+        else:
+            if self._last_decision is None:
+                raise RuntimeError("DTW condition source has no previous fresh decision")
+            previous = self._last_decision
+            decision = type(previous)(
+                stage_index=self.controller.stage_index,
+                progress=previous.progress,
+                advanced=False,
+                terminal=previous.terminal,
+                completion_streak=previous.completion_streak,
+            )
         if decision.advanced:
             self.localizer.reset(decision.stage_index)
             self.localizer.observe(
@@ -120,6 +138,8 @@ class ReferenceVideoConditionSource:
                 "node_frame": localized.node_frame,
                 "path": localized.path,
                 "query_steps": localized.query_steps,
+                "sample_step": localized.sample_step,
+                "fresh_localization": fresh,
                 "mean_cost": localized.mean_cost,
                 "confidence_margin": localized.confidence_margin,
                 "completion_streak": decision.completion_streak,
@@ -184,6 +204,58 @@ class ConditionedChunkPredictor:
             add_observation_horizon(observation),
             stage_index=condition.stage_index,
             video_progress=condition.progress,
+        )
+        return concatenate_action_chunk(action_dict), condition
+
+    def observe(self, observation: Mapping[str, Any], control_step: int) -> bool:
+        observe = getattr(self.condition_source, "observe", None)
+        if observe is None:
+            return False
+        return bool(observe(observation, control_step))
+
+
+class SemanticGoalChunkPredictor:
+    """Bind DTW conditions to semantic subtask text and cached endpoint images."""
+
+    def __init__(
+        self,
+        policy: Any,
+        condition_source: ConditionSource,
+        records: Sequence[FrameRecord],
+        goal_store: GoalImageStore,
+    ) -> None:
+        self.policy = policy
+        self.condition_source = condition_source
+        self.goal_store = goal_store
+        by_stage: dict[int, FrameRecord] = {}
+        for row in records:
+            previous = by_stage.get(row.stage_index)
+            if previous is not None and (
+                previous.segment_start != row.segment_start
+                or previous.segment_end != row.segment_end
+            ):
+                raise ValueError(f"stage {row.stage_index} has multiple semantic segments")
+            by_stage[row.stage_index] = row
+        if not by_stage or sorted(by_stage) != list(range(max(by_stage) + 1)):
+            raise ValueError(f"semantic stages must be contiguous, got {sorted(by_stage)}")
+        if any(
+            not row.task_description or not row.subtask_description
+            for row in by_stage.values()
+        ):
+            raise ValueError("semantic inference records require task and subtask descriptions")
+        self.by_stage = by_stage
+
+    def predict(
+        self, observation: Mapping[str, Any], control_step: int
+    ) -> tuple[np.ndarray, ConditionEstimate]:
+        condition = self.condition_source.estimate(observation, control_step)
+        row = self.by_stage[condition.stage_index]
+        action_dict = self.policy.get_action_with_semantic_goal(
+            add_observation_horizon(observation),
+            video_progress=condition.progress,
+            task_description=row.task_description,
+            subtask_description=row.subtask_description,
+            goal_images=self.goal_store.load(row),
         )
         return concatenate_action_chunk(action_dict), condition
 

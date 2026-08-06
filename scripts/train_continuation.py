@@ -20,7 +20,7 @@ from transformers import TrainingArguments
 
 from stage_state_vla.bootstrap import activate_gr00t, validate_python_environment
 from stage_state_vla.config import load_config, resolve_paths, validate_external_paths
-from stage_state_vla.dataset import load_stage_dataset
+from stage_state_vla.dataset import load_semantic_goal_dataset, load_stage_dataset
 from stage_state_vla.trainer import make_task_balanced_trainer_class
 
 
@@ -28,10 +28,17 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=STANDALONE / "configs/mvp.json")
     parser.add_argument("--max-steps", type=int, default=None)
+    parser.add_argument("--per-device-batch-size", type=int, default=None)
+    parser.add_argument("--global-batch-size", type=int, default=None)
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--train-index", type=Path, default=None)
     parser.add_argument("--val-index", type=Path, default=None)
     parser.add_argument("--no-eval", action="store_true")
+    parser.add_argument(
+        "--smoke-only",
+        action="store_true",
+        help="Run the requested steps without writing final checkpoint weights.",
+    )
     parser.add_argument("--resume", action="store_true")
     return parser.parse_args()
 
@@ -43,6 +50,11 @@ def allow_local_rng_state_for_resume() -> None:
     torch.serialization.add_safe_globals(
         [_reconstruct, np.ndarray, np.dtype, type(np.dtype(np.uint32))]
     )
+
+
+def close_distributed() -> None:
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        torch.distributed.destroy_process_group()
 
 
 def main() -> int:
@@ -82,8 +94,8 @@ def main() -> int:
         raise FileNotFoundError(f"build the validation index first: {val_index}")
 
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
-    local_batch = int(train_cfg["per_device_batch_size"])
-    global_batch = int(train_cfg["global_batch_size"])
+    local_batch = int(args.per_device_batch_size or train_cfg["per_device_batch_size"])
+    global_batch = int(args.global_batch_size or train_cfg["global_batch_size"])
     denominator = world_size * local_batch
     if global_batch % denominator:
         raise ValueError(
@@ -91,30 +103,59 @@ def main() -> int:
         )
     grad_accum = global_batch // denominator
 
-    train_dataset = load_stage_dataset(
-        train_index,
-        training=True,
-        video_backend=train_cfg["video_backend"],
-        max_stages=condition_cfg["max_stages"],
-        progress_source=condition_cfg["progress_source"],
-        progress_noise_nodes=condition_cfg["progress_noise_nodes"],
-        seed=train_cfg["seed"],
-        action_horizon=model_cfg["action_horizon"],
-        normalization_metadata=paths.base_checkpoint / "experiment_cfg/metadata.json",
-    )
-    val_dataset = None
-    if not args.no_eval:
-        val_dataset = load_stage_dataset(
-            val_index,
-            training=False,
+    semantic_goal = config.get("method_family") == "semantic_goal"
+    normalization_metadata = paths.base_checkpoint / "experiment_cfg/metadata.json"
+    if semantic_goal:
+        goal_cache_dir = (paths.repo_root / config["goal"]["cache_dir"]).resolve()
+        train_dataset = load_semantic_goal_dataset(
+            train_index,
+            training=True,
+            goal_cache_dir=goal_cache_dir,
+            goal_image_count=int(config["goal"]["goal_image_count"]),
+            video_backend=train_cfg["video_backend"],
+            progress_jitter_frames=int(condition_cfg["progress_jitter_frames"]),
+            seed=train_cfg["seed"],
+            action_horizon=model_cfg["action_horizon"],
+            normalization_metadata=normalization_metadata,
+        )
+    else:
+        train_dataset = load_stage_dataset(
+            train_index,
+            training=True,
             video_backend=train_cfg["video_backend"],
             max_stages=condition_cfg["max_stages"],
             progress_source=condition_cfg["progress_source"],
-            progress_noise_nodes=0,
+            progress_noise_nodes=condition_cfg["progress_noise_nodes"],
             seed=train_cfg["seed"],
             action_horizon=model_cfg["action_horizon"],
-            normalization_metadata=paths.base_checkpoint / "experiment_cfg/metadata.json",
+            normalization_metadata=normalization_metadata,
         )
+    val_dataset = None
+    if not args.no_eval:
+        if semantic_goal:
+            val_dataset = load_semantic_goal_dataset(
+                val_index,
+                training=False,
+                goal_cache_dir=goal_cache_dir,
+                goal_image_count=int(config["goal"]["goal_image_count"]),
+                video_backend=train_cfg["video_backend"],
+                progress_jitter_frames=0,
+                seed=train_cfg["seed"],
+                action_horizon=model_cfg["action_horizon"],
+                normalization_metadata=normalization_metadata,
+            )
+        else:
+            val_dataset = load_stage_dataset(
+                val_index,
+                training=False,
+                video_backend=train_cfg["video_backend"],
+                max_stages=condition_cfg["max_stages"],
+                progress_source=condition_cfg["progress_source"],
+                progress_noise_nodes=0,
+                seed=train_cfg["seed"],
+                action_horizon=model_cfg["action_horizon"],
+                normalization_metadata=normalization_metadata,
+            )
 
     model = GR00T_N1_5.from_pretrained(
         str(paths.base_checkpoint),
@@ -145,14 +186,23 @@ def main() -> int:
         "effective_global_batch_size": denominator * grad_accum,
         "periodic_eval": not args.no_eval,
         "task_sampling": "uniform task then uniform frame",
-        "condition_slots": "first two unused dimensions in native state[64]",
+        "condition_slots": (
+            "first unused dimension is within-subtask progress in native state[64]"
+            if semantic_goal
+            else "first two unused dimensions in native state[64]"
+        ),
         "normalization_metadata": str(
             paths.base_checkpoint / "experiment_cfg/metadata.json"
         ),
         "condition": condition_cfg,
+        "goal": config.get("goal"),
+        "action": config.get("action"),
         "model": model_cfg,
     }
-    (output_dir / "stage_state_run_config.json").write_text(
+    run_config_name = (
+        "semantic_goal_run_config.json" if semantic_goal else "stage_state_run_config.json"
+    )
+    (output_dir / run_config_name).write_text(
         json.dumps(run_contract, indent=2) + "\n", encoding="utf-8"
     )
     if int(os.environ.get("RANK", "0")) == 0:
@@ -181,7 +231,7 @@ def main() -> int:
         max_steps=max_steps,
         eval_strategy="no" if args.no_eval else "steps",
         eval_steps=int(train_cfg["eval_steps"]),
-        save_strategy="steps",
+        save_strategy="no" if args.smoke_only else "steps",
         save_steps=int(train_cfg["save_steps"]),
         save_total_limit=int(train_cfg["save_total_limit"]),
         report_to="tensorboard",
@@ -214,8 +264,12 @@ def main() -> int:
         flush=True,
     )
     trainer.train(resume_from_checkpoint=args.resume)
+    if args.smoke_only:
+        close_distributed()
+        return 0
     trainer.save_state()
     safe_save_model_for_hf_trainer(trainer=trainer, output_dir=str(output_dir))
+    close_distributed()
     return 0
 
 
