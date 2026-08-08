@@ -18,6 +18,23 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+REFERENCE_POLICY_MODES = {
+    "conditioned_reference_dtw",
+    "semantic_goal_reference_dtw",
+}
+
+
+def is_reference_policy_mode(policy_mode: str) -> bool:
+    return policy_mode in REFERENCE_POLICY_MODES
+
+
+def resolve_execute_steps(config: dict[str, Any], override: int | None) -> int:
+    horizon = int(config["model"]["action_horizon"])
+    configured = int(config.get("action", {}).get("max_execute_steps", horizon))
+    execute_steps = int(override or configured)
+    if not 1 <= execute_steps <= horizon:
+        raise ValueError(f"execute-steps must be in [1, {horizon}]")
+    return execute_steps
 
 
 def parse_args() -> argparse.Namespace:
@@ -40,17 +57,21 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--num-workers", type=int, default=8)
     parser.add_argument("--num-gpus", type=int, default=4)
-    parser.add_argument("--execute-steps", type=int, default=16)
+    parser.add_argument("--execute-steps", type=int, default=None)
     parser.add_argument("--denoising-steps", type=int, default=4)
     parser.add_argument("--base-seed", type=int, default=20260805)
     parser.add_argument("--max-attempts", type=int, default=2)
     parser.add_argument(
         "--policy-mode",
-        choices=("conditioned_reference_dtw", "official_unconditioned"),
+        choices=(
+            "conditioned_reference_dtw",
+            "semantic_goal_reference_dtw",
+            "official_unconditioned",
+        ),
         default="conditioned_reference_dtw",
         help=(
-            "Use the continued checkpoint with GT-video DTW conditions, or the "
-            "native official GR00T policy without condition injection."
+            "Use the v1 conditioned policy, the semantic-goal policy, or the native "
+            "official GR00T policy."
         ),
     )
     parser.add_argument("--no-video", action="store_true")
@@ -203,17 +224,27 @@ def worker_main(
         from stage_state_vla.inference import (
             ConditionedChunkPredictor,
             ReferenceVideoConditionSource,
+            SemanticGoalChunkPredictor,
             add_observation_horizon,
             concatenate_action_chunk,
             split_action,
         )
-        from stage_state_vla.policy import make_conditioned_policy_class
+        from stage_state_vla.policy import (
+            make_conditioned_policy_class,
+            make_semantic_goal_policy_class,
+        )
         from stage_state_vla.reference_video import (
             RGBReferenceEncoder,
             RollingSubsequenceDTWProgressLocalizer,
             SubsequenceDTWLocalizer,
             build_ground_truth_references,
         )
+        from stage_state_vla.semantic_goal import (
+            CURRENT_CAMERA_KEYS,
+            GoalImageStore,
+            make_semantic_goal_transform,
+        )
+        from stage_state_vla.dataset import create_base_datasets
 
         config = load_config(settings["config"])
         paths = resolve_paths(config)
@@ -229,11 +260,21 @@ def worker_main(
         localizer_cfg = condition_cfg["localizer"]
         data_config = DATA_CONFIG_MAP[config["model"]["data_config"]]
         policy_mode = str(settings["policy_mode"])
-        Policy = (
-            Gr00tPolicy
-            if policy_mode == "official_unconditioned"
-            else make_conditioned_policy_class()
-        )
+        reference_mode = is_reference_policy_mode(policy_mode)
+        semantic_mode = policy_mode == "semantic_goal_reference_dtw"
+        method_family = config.get("method_family")
+        if semantic_mode and method_family != "semantic_goal":
+            raise ValueError("semantic_goal_reference_dtw requires a semantic-goal config")
+        if policy_mode == "conditioned_reference_dtw" and method_family == "semantic_goal":
+            raise ValueError(
+                "semantic-goal configs require policy-mode semantic_goal_reference_dtw"
+            )
+        if policy_mode == "official_unconditioned":
+            Policy = Gr00tPolicy
+        elif semantic_mode:
+            Policy = make_semantic_goal_policy_class()
+        else:
+            Policy = make_conditioned_policy_class()
         torch.cuda.set_device(0)
         print(
             f"[worker={worker_id} gpu={gpu_id}] loading checkpoint {checkpoint}",
@@ -242,7 +283,13 @@ def worker_main(
         policy_kwargs = {
             "model_path": str(checkpoint),
             "modality_config": data_config.modality_config(),
-            "modality_transform": data_config.transform(),
+            "modality_transform": (
+                make_semantic_goal_transform(
+                    goal_image_count=int(config["goal"]["goal_image_count"])
+                )
+                if semantic_mode
+                else data_config.transform()
+            ),
             "embodiment_tag": config["model"]["embodiment_tag"],
             "denoising_steps": int(settings["denoising_steps"]),
             "device": "cuda:0",
@@ -257,9 +304,15 @@ def worker_main(
                 camera_keys=localizer_cfg["camera_keys"],
                 spatial_size=int(localizer_cfg["image_size"]),
             )
-            if policy_mode == "conditioned_reference_dtw"
+            if reference_mode
             else None
         )
+        goal_store = (
+            GoalImageStore((paths.repo_root / config["goal"]["cache_dir"]).resolve())
+            if semantic_mode
+            else None
+        )
+        goal_base_datasets: dict[str, Any] = {}
         print(
             f"[worker={worker_id} gpu={gpu_id}] ready mode={policy_mode}",
             flush=True,
@@ -294,7 +347,7 @@ def worker_main(
                 stage_count = int(config["stage_counts"][task])
                 references = None
                 predictor = None
-                if policy_mode == "conditioned_reference_dtw":
+                if reference_mode:
                     records = build_episode_records(
                         task=task,
                         split=settings["split_namespace"],
@@ -321,33 +374,59 @@ def worker_main(
                             jump_penalty=float(localizer_cfg["jump_penalty"]),
                         ),
                     )
-                    predictor = ConditionedChunkPredictor(
-                        policy,
-                        ReferenceVideoConditionSource(
-                            localizer,
-                            num_stages=stage_count,
-                            completion_threshold=float(
-                                condition_cfg["completion_threshold"]
-                            ),
-                            confirmations=int(
-                                condition_cfg["completion_confirmations"]
-                            ),
-                        ),
+                    condition_source = ReferenceVideoConditionSource(
+                        localizer,
+                        num_stages=stage_count,
+                        completion_threshold=float(condition_cfg["completion_threshold"]),
+                        confirmations=int(condition_cfg["completion_confirmations"]),
                     )
+                    if semantic_mode:
+                        assert goal_store is not None
+                        endpoint_rows = {
+                            row.stage_index: row for row in records
+                        }
+                        missing = [
+                            row
+                            for row in endpoint_rows.values()
+                            if not goal_store.path_for(row).is_file()
+                        ]
+                        if missing:
+                            if task not in goal_base_datasets:
+                                goal_base_datasets.update(
+                                    create_base_datasets(
+                                        records,
+                                        training=False,
+                                        video_backend=config["training"]["video_backend"],
+                                    )
+                                )
+                            base = goal_base_datasets[task]
+                            for row in missing:
+                                raw = base.get_step_data(row.episode, row.segment_end)
+                                goal_store.save(
+                                    row,
+                                    {key: raw[key] for key in CURRENT_CAMERA_KEYS},
+                                )
+                        predictor = SemanticGoalChunkPredictor(
+                            policy,
+                            condition_source,
+                            records,
+                            goal_store,
+                        )
+                    else:
+                        predictor = ConditionedChunkPredictor(policy, condition_source)
                 max_steps = int(get_task_horizon(task))
                 run_manifest = {
                     "task": task,
                     "episode_split": settings["split_namespace"],
                     "reference_episode": (
-                        episode if policy_mode == "conditioned_reference_dtw" else None
+                        episode if reference_mode else None
                     ),
                     "dataset": str(dataset),
                     "policy_mode": policy_mode,
                     "condition_source": (
-                        "reference_dtw"
-                        if policy_mode == "conditioned_reference_dtw"
-                        else "none"
+                        "reference_dtw" if reference_mode else "none"
                     ),
+                    "semantic_goal": config.get("goal") if semantic_mode else None,
                     "evaluation_split_sha256": settings["split_sha256"],
                     "checkpoint": str(checkpoint),
                     "reference_stride": int(condition_cfg["reference_stride"]),
@@ -536,6 +615,13 @@ def main() -> int:
     output_dir = args.output_dir.expanduser().resolve()
     if not checkpoint.is_dir():
         raise FileNotFoundError(checkpoint)
+    config = load_json(config_path)
+    execute_steps = resolve_execute_steps(config, args.execute_steps)
+    if (
+        args.policy_mode == "semantic_goal_reference_dtw"
+        and config.get("method_family") != "semantic_goal"
+    ):
+        raise ValueError("semantic_goal_reference_dtw requires a semantic-goal config")
     split_manifest = load_json(split_path)
     if split_manifest.get("name") != "gt_test50_v1":
         raise ValueError(f"unexpected frozen split name in {split_path}")
@@ -551,7 +637,7 @@ def main() -> int:
     settings = {
         "config": str(config_path),
         "checkpoint": str(checkpoint),
-        "execute_steps": args.execute_steps,
+        "execute_steps": execute_steps,
         "denoising_steps": args.denoising_steps,
         "base_seed": args.base_seed,
         "split_namespace": split_manifest["name"],
@@ -570,9 +656,11 @@ def main() -> int:
         "policy_mode": args.policy_mode,
         "condition_source": (
             "reference_dtw"
-            if args.policy_mode == "conditioned_reference_dtw"
+            if is_reference_policy_mode(args.policy_mode)
             else "none"
         ),
+        "method_family": config.get("method_family", "ordinal_stage"),
+        "semantic_goal": config.get("goal"),
         "output_dir": str(output_dir),
         "num_workers": args.num_workers,
         "num_gpus": args.num_gpus,
@@ -580,7 +668,7 @@ def main() -> int:
             str(worker_id): worker_id % args.num_gpus
             for worker_id in range(args.num_workers)
         },
-        "execute_steps": args.execute_steps,
+        "execute_steps": execute_steps,
         "denoising_steps": args.denoising_steps,
         "base_seed": args.base_seed,
         "seed_derivation": seed_derivation,
